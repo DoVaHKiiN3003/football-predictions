@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draw Predictor - Football Prediction Site</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚽ Draw Predictor</h1>
+            <p class="subtitle">Matches where away team is higher in standings than home team</p>
+            <div class="controls">
+                <button id="refreshBtn" onclick="manualRefresh()">🔄 Refresh Now</button>
+                <span id="lastUpdate" class="last-update"></span>
+                <span id="count" class="match-count"></span>
+            </div>
+            <div id="status" class="status"></div>
+        </header>
+        <div id="matchesContainer" class="matches-grid"></div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
