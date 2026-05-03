@@ -41,6 +41,36 @@ h1 {
     margin-bottom: 15px;
 }
 
+.tabs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.tab {
+    background: rgba(255, 255, 255, 0.1);
+    color: #888;
+    border: 1px solid #333;
+    padding: 10px 25px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.tab:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.tab.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: transparent;
+}
+
 .controls {
     display: flex;
     justify-content: center;
@@ -130,6 +160,11 @@ h1 {
     margin-bottom: 15px;
     text-align: center;
     color: #fff;
+}
+
+.score {
+    color: #ffd700;
+    font-weight: 700;
 }
 
 .stats {

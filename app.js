@@ -2,9 +2,10 @@ const API_KEY = '4687220268e3225c2b7585813360081a1f258dfa';
 const BSD_BASE = 'https://sports.bzzoiro.com/api';
 const CACHE_KEY = 'drawPredictionsCache';
 const CACHE_DURATION = 3600000; // 1 hour
-const AUTO_REFRESH = 10800000; // 3 hours
+const AUTO_REFRESH = 10800000; // 3 hours;
 
 let isLoading = false;
+let currentTab = 'upcoming';
 
 // Fetch with auth header
 async function fetchAPI(endpoint) {
@@ -15,7 +16,7 @@ async function fetchAPI(endpoint) {
     return response.json();
 }
 
-// Cache management - store only essential fields
+// Cache management
 function getCache() {
     const cachedData = localStorage.getItem(CACHE_KEY);
     if (!cachedData) return null;
@@ -29,7 +30,6 @@ function getCache() {
 }
 
 function setCache(matches) {
-    // Store only essential fields to reduce size
     const minimal = matches.map(m => ({
         league: m.league,
         home_team: m.home_team,
@@ -38,7 +38,9 @@ function setCache(matches) {
         homePos: m.homePos,
         awayPos: m.awayPos,
         prob_draw: m.prob_draw,
-        odds_draw: m.odds_draw
+        odds_draw: m.odds_draw,
+        home_score: m.home_score,
+        away_score: m.away_score
     }));
     
     try {
@@ -52,33 +54,22 @@ function setCache(matches) {
     }
 }
 
-// Fetch all leagues
-async function fetchLeagues() {
-    const data = await fetchAPI('/leagues/');
-    return data.results || [];
-}
-
-// Fetch standings for a league
-async function fetchStandings(leagueId) {
-    try {
-        const data = await fetchAPI('/leagues/' + leagueId + '/standings/');
-        return data.standings || [];
-    } catch {
-        return [];
-    }
-}
+// All 48 BSD leagues
+const ALL_LEAGUES = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,17,18,19,20,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,38,39,40,41,42,43,44,46,47,48,49,50,51,52];
 
 // Build standings map: { team_id: position }
 async function buildStandingsMap() {
     const map = {};
-    const leaguesWithStandings = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15, 19, 20, 22, 23, 24, 25, 26, 28, 30, 32, 33, 34, 38, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52];
-    
-    for (const leagueId of leaguesWithStandings) {
-        const standings = await fetchStandings(leagueId);
-        standings.forEach(s => {
-            map[s.team_id] = s.position;
-        });
-        await new Promise(r => setTimeout(r, 100));
+    for (const leagueId of ALL_LEAGUES) {
+        try {
+            const data = await fetchAPI('/leagues/' + leagueId + '/standings/');
+            if (data.standings) {
+                data.standings.forEach(s => {
+                    map[s.team_id] = s.position;
+                });
+            }
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 50));
     }
     return map;
 }
@@ -86,6 +77,14 @@ async function buildStandingsMap() {
 // Fetch upcoming events
 async function fetchUpcomingEvents() {
     const data = await fetchAPI('/events/?status=notstarted&limit=500');
+    return data.results || [];
+}
+
+// Fetch finished events (last 30 days)
+async function fetchFinishedEvents() {
+    const dateTo = new Date().toISOString().split('T')[0];
+    const dateFrom = new Date(Date.now() - 30*86400000).toISOString().split('T')[0];
+    const data = await fetchAPI('/events/?status=finished&date_from=' + dateFrom + '&date_to=' + dateTo + '&limit=500');
     return data.results || [];
 }
 
@@ -111,12 +110,12 @@ function formatDate(dateStr) {
 }
 
 // Render matches
-function renderMatches(matches) {
+function renderMatches(matches, isResultsTab) {
     const container = document.getElementById('matchesContainer');
     const countEl = document.getElementById('count');
     
     if (matches.length === 0) {
-        container.innerHTML = '<div class="loading">No matches found (away team higher in standings)</div>';
+        container.innerHTML = '<div class="loading">No matches found</div>';
         countEl.textContent = '';
         return;
     }
@@ -129,24 +128,29 @@ function renderMatches(matches) {
         const awayPos = m.awayPos;
         const drawProb = m.prob_draw != null ? m.prob_draw.toFixed(1) + '%' : 'N/A';
         const drawOdds = m.odds_draw ? m.odds_draw.toFixed(2) : 'N/A';
+        const scoreDisplay = (m.home_score != null && m.away_score != null) 
+            ? m.home_score + '-' + m.away_score 
+            : '';
         
         return '<div class="match-card">' +
             '<div class="league-info">' +
                 '<span class="league-name">' + league + '</span>' +
                 '<span class="match-date">' + formatDate(m.event_date) + '</span>' +
             '</div>' +
-            '<div class="teams">' + m.home_team + ' vs ' + m.away_team + '</div>' +
+            '<div class="teams">' + m.home_team + ' vs ' + m.away_team + 
+            (scoreDisplay ? ' <span class="score">(' + scoreDisplay + ')</span>' : '') + 
+            '</div>' +
             '<div class="stats">' +
                 '<div class="stat">' +
-                    '<div class="stat-label">Draw Probability</div>' +
-                    '<div class="stat-value ' + (m.prob_draw == null ? 'no-data' : '') + '">' + drawProb + '</div>' +
+                    '<div class="stat-label">' + (isResultsTab ? 'Result' : 'Draw Probability') + '</div>' +
+                    '<div class="stat-value">' + (isResultsTab ? scoreDisplay : drawProb) + '</div>' +
                 '</div>' +
                 '<div class="stat">' +
                     '<div class="stat-label">Draw Odds</div>' +
                     '<div class="stat-value ' + (!m.odds_draw ? 'no-data' : '') + '">' + drawOdds + '</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="positions">Away (' + awayPos + getOrdinal(awayPos) + ') vs Home (' + homePos + getOrdinal(homePos) + ')</div>' +
+            (awayPos && homePos ? '<div class="positions">Away (' + awayPos + getOrdinal(awayPos) + ') vs Home (' + homePos + getOrdinal(homePos) + ')</div>' : '') +
         '</div>';
     }).join('');
 }
@@ -161,8 +165,20 @@ function getOrdinal(n) {
     }
 }
 
-// Main function to load and process data
-async function loadData(forceRefresh = false) {
+// Switch tabs
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    if (tab === 'upcoming') {
+        loadUpcoming();
+    } else {
+        loadResults();
+    }
+}
+
+// Load upcoming matches (away team higher in standings)
+async function loadUpcoming() {
     if (isLoading) return;
     isLoading = true;
     
@@ -171,22 +187,16 @@ async function loadData(forceRefresh = false) {
     refreshBtn.disabled = true;
     
     try {
-        statusEl.textContent = 'Loading data...';
+        statusEl.textContent = 'Loading upcoming matches...';
         
-        if (!forceRefresh) {
-            const cached = getCache();
-            if (cached) {
-                statusEl.textContent = 'Loaded from cache';
-                renderMatches(cached.data);
-                document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
-                isLoading = false;
-                refreshBtn.disabled = false;
-                return;
-            }
+        const cached = getCache();
+        if (cached && cached.upcoming) {
+            renderMatches(cached.upcoming, false);
+            document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
+            isLoading = false;
+            refreshBtn.disabled = false;
+            return;
         }
-        
-        statusEl.textContent = 'Fetching leagues...';
-        const leagues = await fetchLeagues();
         
         statusEl.textContent = 'Building standings map...';
         const standingsMap = await buildStandingsMap();
@@ -197,17 +207,14 @@ async function loadData(forceRefresh = false) {
         statusEl.textContent = 'Fetching predictions...';
         const predictions = await fetchPredictions();
         const predMap = {};
-        predictions.forEach(p => {
-            predMap[p.event.id] = p;
-        });
+        predictions.forEach(p => { predMap[p.event.id] = p; });
         
-        statusEl.textContent = 'Filtering matches by standings...';
-        const finalMatches = events.filter(event => {
+        statusEl.textContent = 'Filtering matches...';
+        const matches = events.filter(event => {
             const homeId = event.home_team_obj?.id;
             const awayId = event.away_team_obj?.id;
             const homePos = standingsMap[homeId];
             const awayPos = standingsMap[awayId];
-            
             if (!homePos || !awayPos) return false;
             return awayPos < homePos;
         }).map(event => {
@@ -224,11 +231,76 @@ async function loadData(forceRefresh = false) {
             };
         });
         
-        finalMatches.sort((a, b) => (b.prob_draw || 0) - (a.prob_draw || 0));
+        matches.sort((a, b) => (b.prob_draw || 0) - (a.prob_draw || 0));
         
-        statusEl.textContent = 'Found ' + finalMatches.length + ' matches';
-        setCache(finalMatches);
-        renderMatches(finalMatches);
+        statusEl.textContent = 'Found ' + matches.length + ' matches';
+        
+        // Save to cache
+        const cachedData = getCache() || { timestamp: Date.now(), data: {} };
+        cachedData.upcoming = matches;
+        setCache(cachedData);
+        
+        renderMatches(matches, false);
+        document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        
+    } catch (error) {
+        statusEl.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+        console.error(error);
+    } finally {
+        isLoading = false;
+        refreshBtn.disabled = false;
+    }
+}
+
+// Load finished matches that ended in draws
+async function loadResults() {
+    if (isLoading) return;
+    isLoading = true;
+    
+    const statusEl = document.getElementById('status');
+    const refreshBtn = document.getElementById('refreshBtn');
+    refreshBtn.disabled = true;
+    
+    try {
+        statusEl.textContent = 'Loading finished matches...';
+        
+        const cached = getCache();
+        if (cached && cached.results) {
+            renderMatches(cached.results, true);
+            document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
+            isLoading = false;
+            refreshBtn.disabled = false;
+            return;
+        }
+        
+        statusEl.textContent = 'Fetching finished matches...';
+        const events = await fetchFinishedEvents();
+        
+        statusEl.textContent = 'Filtering drawn matches...';
+        const drawnMatches = events.filter(event => {
+            return event.home_score === event.away_score && event.home_score !== null;
+        }).map(event => {
+            return {
+                league: event.league?.name || 'Unknown',
+                home_team: event.home_team,
+                away_team: event.away_team,
+                event_date: event.event_date,
+                home_score: event.home_score,
+                away_score: event.away_score,
+                odds_draw: event.odds_draw,
+                homePos: null,
+                awayPos: null
+            };
+        });
+        
+        statusEl.textContent = 'Found ' + drawnMatches.length + ' drawn matches';
+        
+        // Save to cache
+        const cachedData = getCache() || { timestamp: Date.now(), data: {} };
+        cachedData.results = drawnMatches;
+        setCache(cachedData);
+        
+        renderMatches(drawnMatches, true);
         document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
         
     } catch (error) {
@@ -243,13 +315,19 @@ async function loadData(forceRefresh = false) {
 // Manual refresh
 function manualRefresh() {
     localStorage.removeItem(CACHE_KEY);
-    loadData(true);
+    if (currentTab === 'upcoming') {
+        loadUpcoming();
+    } else {
+        loadResults();
+    }
 }
 
 // Auto refresh every 3 hours
 setInterval(() => {
-    loadData(false);
+    if (currentTab === 'upcoming') {
+        loadUpcoming();
+    }
 }, AUTO_REFRESH);
 
 // Initial load
-loadData(false);
+loadUpcoming();

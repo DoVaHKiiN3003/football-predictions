@@ -11,6 +11,10 @@
         <header>
             <h1>⚽ Draw Predictor</h1>
             <p class="subtitle">Matches where away team is higher in standings than home team</p>
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('upcoming')">📅 Upcoming</button>
+                <button class="tab" onclick="switchTab('results')">🏆 Results (Draws)</button>
+            </div>
             <div class="controls">
                 <button id="refreshBtn" onclick="manualRefresh()">🔄 Refresh Now</button>
                 <span id="lastUpdate" class="last-update"></span>
