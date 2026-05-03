@@ -248,22 +248,69 @@ async function loadUpcoming() {
 async function loadResults() {
     if (isLoading) return;
     isLoading = true;
-
+    
     const statusEl = document.getElementById('status');
     const refreshBtn = document.getElementById('refreshBtn');
     refreshBtn.disabled = true;
-
+    
     try {
         statusEl.textContent = 'Loading finished matches...';
-
+        
         const cached = getCache();
-        if (cached && cached.results && Array.isArray(cached.results)) {
+        if (cached && cached.results && Array.isArray(cached.results) && cached.results.length > 0) {
+            console.log('Using cached results:', cached.results.length, 'matches');
             renderMatches(cached.results, true);
             document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
             isLoading = false;
             refreshBtn.disabled = false;
             return;
         }
+        
+        statusEl.textContent = 'Fetching finished matches...';
+        const events = await fetchFinishedEvents();
+        
+        if (!Array.isArray(events)) {
+            throw new Error('Invalid events data from API');
+        }
+        
+        statusEl.textContent = 'Filtering drawn matches...';
+        const drawnMatches = events.filter(event => {
+            if (!event || event.home_score === null || event.away_score === null) return false;
+            return event.home_score === event.away_score;
+        }).map(event => {
+            return {
+                league: event.league?.name || 'Unknown',
+                home_team: event.home_team,
+                away_team: event.away_team,
+                event_date: event.event_date,
+                home_score: event.home_score,
+                away_score: event.away_score,
+                odds_draw: event.odds_draw,
+                homePos: null,
+                awayPos: null
+            };
+        });
+        
+        if (!Array.isArray(drawnMatches)) {
+            throw new Error('drawnMatches is not an array');
+        }
+        
+        statusEl.textContent = 'Found ' + drawnMatches.length + ' drawn matches';
+        
+        // Save to cache
+        setCache(null, drawnMatches);
+        
+        renderMatches(drawnMatches, true);
+        document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        
+    } catch (error) {
+        statusEl.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+        console.error(error);
+    } finally {
+        isLoading = false;
+        refreshBtn.disabled = false;
+    }
+}
 
         statusEl.textContent = 'Fetching finished matches...';
         const events = await fetchFinishedEvents();
