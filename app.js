@@ -16,7 +16,7 @@ async function fetchAPI(endpoint) {
     return response.json();
 }
 
-// Cache management
+// Cache management - stores {timestamp, upcoming[], results[]}
 function getCache() {
     const cachedData = localStorage.getItem(CACHE_KEY);
     if (!cachedData) return null;
@@ -29,25 +29,16 @@ function getCache() {
     }
 }
 
-function setCache(matches) {
-    const minimal = matches.map(m => ({
-        league: m.league,
-        home_team: m.home_team,
-        away_team: m.away_team,
-        event_date: m.event_date,
-        homePos: m.homePos,
-        awayPos: m.awayPos,
-        prob_draw: m.prob_draw,
-        odds_draw: m.odds_draw,
-        home_score: m.home_score,
-        away_score: m.away_score
-    }));
-    
+function setCache(upcoming, results) {
+    const existingCache = getCache();
+    const cacheObj = {
+        timestamp: Date.now(),
+        upcoming: upcoming || (existingCache && existingCache.upcoming) || [],
+        results: results || (existingCache && existingCache.results) || []
+    };
+
     try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({
-            timestamp: Date.now(),
-            data: minimal
-        }));
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cacheObj));
     } catch (e) {
         console.warn('Cache quota exceeded, clearing cache');
         localStorage.removeItem(CACHE_KEY);
@@ -77,7 +68,7 @@ async function buildStandingsMap() {
 // Fetch upcoming events
 async function fetchUpcomingEvents() {
     const data = await fetchAPI('/events/?status=notstarted&limit=500');
-    return data.results || [];
+    return Array.isArray(data.results) ? data.results : (Array.isArray(data) ? data : []);
 }
 
 // Fetch finished events (last 30 days)
@@ -85,14 +76,14 @@ async function fetchFinishedEvents() {
     const dateTo = new Date().toISOString().split('T')[0];
     const dateFrom = new Date(Date.now() - 30*86400000).toISOString().split('T')[0];
     const data = await fetchAPI('/events/?status=finished&date_from=' + dateFrom + '&date_to=' + dateTo + '&limit=500');
-    return data.results || [];
+    return Array.isArray(data.results) ? data.results : (Array.isArray(data) ? data : []);
 }
 
 // Fetch predictions
 async function fetchPredictions() {
     try {
         const data = await fetchAPI('/predictions/');
-        return data.results || [];
+        return Array.isArray(data.results) ? data.results : (Array.isArray(data) ? data : []);
     } catch {
         return [];
     }
@@ -101,8 +92,8 @@ async function fetchPredictions() {
 // Format date
 function formatDate(dateStr) {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { 
-        month: 'short', 
+    return date.toLocaleDateString('en-US', {
+        month: 'short',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
@@ -113,32 +104,36 @@ function formatDate(dateStr) {
 function renderMatches(matches, isResultsTab) {
     const container = document.getElementById('matchesContainer');
     const countEl = document.getElementById('count');
-    
+
+    if (!Array.isArray(matches)) {
+        matches = [];
+    }
+
     if (matches.length === 0) {
         container.innerHTML = '<div class="loading">No matches found</div>';
         countEl.textContent = '';
         return;
     }
-    
+
     countEl.textContent = matches.length + ' matches found';
-    
+
     container.innerHTML = matches.map(m => {
         const league = m.league || 'Unknown';
         const homePos = m.homePos;
         const awayPos = m.awayPos;
         const drawProb = m.prob_draw != null ? m.prob_draw.toFixed(1) + '%' : 'N/A';
         const drawOdds = m.odds_draw ? m.odds_draw.toFixed(2) : 'N/A';
-        const scoreDisplay = (m.home_score != null && m.away_score != null) 
-            ? m.home_score + '-' + m.away_score 
+        const scoreDisplay = (m.home_score != null && m.away_score != null)
+            ? m.home_score + '-' + m.away_score
             : '';
-        
+
         return '<div class="match-card">' +
             '<div class="league-info">' +
                 '<span class="league-name">' + league + '</span>' +
                 '<span class="match-date">' + formatDate(m.event_date) + '</span>' +
             '</div>' +
-            '<div class="teams">' + m.home_team + ' vs ' + m.away_team + 
-            (scoreDisplay ? ' <span class="score">(' + scoreDisplay + ')</span>' : '') + 
+            '<div class="teams">' + m.home_team + ' vs ' + m.away_team +
+            (scoreDisplay ? ' <span class="score">(' + scoreDisplay + ')</span>' : '') +
             '</div>' +
             '<div class="stats">' +
                 '<div class="stat">' +
@@ -181,34 +176,34 @@ function switchTab(tab) {
 async function loadUpcoming() {
     if (isLoading) return;
     isLoading = true;
-    
+
     const statusEl = document.getElementById('status');
     const refreshBtn = document.getElementById('refreshBtn');
     refreshBtn.disabled = true;
-    
+
     try {
         statusEl.textContent = 'Loading upcoming matches...';
-        
+
         const cached = getCache();
-        if (cached && cached.upcoming) {
+        if (cached && cached.upcoming && Array.isArray(cached.upcoming)) {
             renderMatches(cached.upcoming, false);
             document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
             isLoading = false;
             refreshBtn.disabled = false;
             return;
         }
-        
+
         statusEl.textContent = 'Building standings map...';
         const standingsMap = await buildStandingsMap();
-        
+
         statusEl.textContent = 'Fetching upcoming matches...';
         const events = await fetchUpcomingEvents();
-        
+
         statusEl.textContent = 'Fetching predictions...';
         const predictions = await fetchPredictions();
         const predMap = {};
         predictions.forEach(p => { predMap[p.event.id] = p; });
-        
+
         statusEl.textContent = 'Filtering matches...';
         const matches = events.filter(event => {
             const homeId = event.home_team_obj?.id;
@@ -230,19 +225,16 @@ async function loadUpcoming() {
                 odds_draw: event.odds_draw
             };
         });
-        
+
         matches.sort((a, b) => (b.prob_draw || 0) - (a.prob_draw || 0));
-        
+
         statusEl.textContent = 'Found ' + matches.length + ' matches';
-        
-        // Save to cache
-        const cachedData = getCache() || { timestamp: Date.now(), data: {} };
-        cachedData.upcoming = matches;
-        setCache(cachedData);
-        
+
+        setCache(matches, null);
+
         renderMatches(matches, false);
         document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
-        
+
     } catch (error) {
         statusEl.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
         console.error(error);
@@ -256,26 +248,26 @@ async function loadUpcoming() {
 async function loadResults() {
     if (isLoading) return;
     isLoading = true;
-    
+
     const statusEl = document.getElementById('status');
     const refreshBtn = document.getElementById('refreshBtn');
     refreshBtn.disabled = true;
-    
+
     try {
         statusEl.textContent = 'Loading finished matches...';
-        
+
         const cached = getCache();
-        if (cached && cached.results) {
+        if (cached && cached.results && Array.isArray(cached.results)) {
             renderMatches(cached.results, true);
             document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date(cached.timestamp).toLocaleTimeString();
             isLoading = false;
             refreshBtn.disabled = false;
             return;
         }
-        
+
         statusEl.textContent = 'Fetching finished matches...';
         const events = await fetchFinishedEvents();
-        
+
         statusEl.textContent = 'Filtering drawn matches...';
         const drawnMatches = events.filter(event => {
             return event.home_score === event.away_score && event.home_score !== null;
@@ -287,22 +279,17 @@ async function loadResults() {
                 event_date: event.event_date,
                 home_score: event.home_score,
                 away_score: event.away_score,
-                odds_draw: event.odds_draw,
-                homePos: null,
-                awayPos: null
+                odds_draw: event.odds_draw
             };
         });
-        
+
         statusEl.textContent = 'Found ' + drawnMatches.length + ' drawn matches';
-        
-        // Save to cache
-        const cachedData = getCache() || { timestamp: Date.now(), data: {} };
-        cachedData.results = drawnMatches;
-        setCache(cachedData);
-        
+
+        setCache(null, drawnMatches);
+
         renderMatches(drawnMatches, true);
         document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
-        
+
     } catch (error) {
         statusEl.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
         console.error(error);
